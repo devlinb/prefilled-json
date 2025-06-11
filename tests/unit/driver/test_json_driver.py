@@ -252,3 +252,190 @@ class TestJsonFieldDriver:
         result = driver.generate_json(fields)
         
         assert result == '{"name": "Alice", "age": 30, "city": "Seattle"}'
+
+    def test_generate_json_simple_nested_object(self):
+        """Test generating JSON with a simple nested object."""
+        call_count = 0
+        def mock_generate(prompt: str, stop: Optional[str]) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:  # name field
+                return '"Alice",'
+            elif call_count == 2:  # address.street field
+                return '"123 Main St",'
+            elif call_count == 3:  # address.city field
+                return '"Seattle"'
+            elif call_count == 4:  # age field
+                return '30'
+            return '""'
+        
+        driver = JsonFieldDriver(mock_generate)
+        fields = [
+            {"name": "string"},
+            {"address": {
+                "street": "string",
+                "city": "string"
+            }},
+            {"age": "number"}
+        ]
+        result = driver.generate_json(fields)
+        
+        expected = '{"name": "Alice", "address": {"street": "123 Main St", "city": "Seattle"}, "age": 30}'
+        assert result == expected
+
+    def test_generate_json_nested_object_with_numbers(self):
+        """Test nested object containing number fields."""
+        call_count = 0
+        def mock_generate(prompt: str, stop: Optional[str]) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:  # name field
+                return '"Bob",'
+            elif call_count == 2:  # coordinates.lat field
+                return '47.6062,'
+            elif call_count == 3:  # coordinates.lng field
+                return '-122.3321'
+            return '""'
+        
+        driver = JsonFieldDriver(mock_generate)
+        fields = [
+            {"name": "string"},
+            {"coordinates": {
+                "lat": "number",
+                "lng": "number"
+            }}
+        ]
+        result = driver.generate_json(fields)
+        
+        expected = '{"name": "Bob", "coordinates": {"lat": 47.6062, "lng": -122.3321}}'
+        assert result == expected
+
+    def test_generate_json_deeply_nested_object(self):
+        """Test deeply nested objects (3 levels)."""
+        call_count = 0
+        def mock_generate(prompt: str, stop: Optional[str]) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:  # name
+                return '"Charlie",'
+            elif call_count == 2:  # profile.contact.email
+                return '"charlie@example.com",'
+            elif call_count == 3:  # profile.contact.phone
+                return '"555-1234",'
+            elif call_count == 4:  # profile.age
+                return '28'
+            return '""'
+        
+        driver = JsonFieldDriver(mock_generate)
+        fields = [
+            {"name": "string"},
+            {"profile": {
+                "contact": {
+                    "email": "string",
+                    "phone": "string"
+                },
+                "age": "number"
+            }}
+        ]
+        result = driver.generate_json(fields)
+        
+        expected = '{"name": "Charlie", "profile": {"contact": {"email": "charlie@example.com", "phone": "555-1234"}, "age": 28}}'
+        assert result == expected
+
+    def test_generate_json_multiple_nested_objects(self):
+        """Test multiple nested objects at the same level."""
+        call_count = 0
+        def mock_generate(prompt: str, stop: Optional[str]) -> str:
+            nonlocal call_count
+            call_count += 1
+            responses = [
+                '"Diana",',           # name
+                '"123 Oak St",',      # address.street
+                '"Portland",',        # address.city
+                '"Engineer",',        # job.title
+                '"TechCorp"'          # job.company
+            ]
+            return responses[call_count - 1] if call_count <= len(responses) else '""'
+        
+        driver = JsonFieldDriver(mock_generate)
+        fields = [
+            {"name": "string"},
+            {"address": {
+                "street": "string",
+                "city": "string"
+            }},
+            {"job": {
+                "title": "string",
+                "company": "string"
+            }}
+        ]
+        result = driver.generate_json(fields)
+        
+        expected = '{"name": "Diana", "address": {"street": "123 Oak St", "city": "Portland"}, "job": {"title": "Engineer", "company": "TechCorp"}}'
+        assert result == expected
+
+    def test_generate_json_nested_object_with_trailing_punctuation(self):
+        """Test that nested objects handle LLM trailing punctuation correctly."""
+        call_count = 0
+        def mock_generate(prompt: str, stop: Optional[str]) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:  # name
+                return '"Eve",'
+            elif call_count == 2:  # settings.theme
+                return '"dark",}'  # LLM adds both comma and brace
+            elif call_count == 3:  # settings.lang
+                return '"en",'  # LLM adds comma to final nested field
+            return '""'
+        
+        driver = JsonFieldDriver(mock_generate)
+        fields = [
+            {"name": "string"},
+            {"settings": {
+                "theme": "string",
+                "lang": "string"
+            }}
+        ]
+        result = driver.generate_json(fields)
+        
+        expected = '{"name": "Eve", "settings": {"theme": "dark", "lang": "en"}}'
+        assert result == expected
+
+    def test_generate_json_single_nested_object(self):
+        """Test JSON with only a nested object."""
+        call_count = 0
+        def mock_generate(prompt: str, stop: Optional[str]) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:  # user.name
+                return '"Frank",'
+            elif call_count == 2:  # user.id
+                return '12345'
+            return '""'
+        
+        driver = JsonFieldDriver(mock_generate)
+        fields = [
+            {"user": {
+                "name": "string",
+                "id": "number"
+            }}
+        ]
+        result = driver.generate_json(fields)
+        
+        expected = '{"user": {"name": "Frank", "id": 12345}}'
+        assert result == expected
+
+    def test_generate_json_empty_nested_object(self):
+        """Test nested object with no fields."""
+        def mock_generate(prompt: str, stop: Optional[str]) -> str:
+            return '"Grace"'
+        
+        driver = JsonFieldDriver(mock_generate)
+        fields = [
+            {"name": "string"},
+            {"metadata": {}}
+        ]
+        result = driver.generate_json(fields)
+        
+        expected = '{"name": "Grace", "metadata": {}}'
+        assert result == expected

@@ -27,7 +27,7 @@ Because we are dealing with very small parameter models, a lot of things are not
 2. Types other than string and number
 3. Optional fields.
 
-Currently nested objects are not supported, but I'll add support soon.
+Nested objects are now supported! See examples below.
 
 ## Usage
 
@@ -40,17 +40,54 @@ def my_generate_func(prompt: str, stop_token: str = None) -> str:
     # stop_token tells the LLM when to stop (e.g., "," or None for final field)
     return llm_response
 
-# Define the JSON schema you want
+# Basic usage with flat fields
 fields = [
     {"name": "string"},
-    {"age": "number"}, 
+    {"age": "number"},
     {"city": "string"}
 ]
 
-# Create driver and generate
 driver = JsonFieldDriver(generate=my_generate_func)
 result = driver.generate_json(fields)
 # Returns: '{"name": "Alice", "age": 30, "city": "Seattle"}'
+
+# Nested object usage
+nested_fields = [
+    {"name": "string"},
+    {"address": {
+        "street": "string",
+        "city": "string",
+        "zip": "number"
+    }},
+    {"age": "number"}
+]
+
+result = driver.generate_json(nested_fields)
+# Returns: '{"name": "Alice", "address": {"street": "123 Main St", "city": "Seattle", "zip": 98101}, "age": 30}'
+```
+
+## Nested Objects
+
+You can create arbitrarily deep nested structures:
+
+```python
+# Deeply nested example
+complex_fields = [
+    {"user": {
+        "profile": {
+            "name": "string",
+            "contact": {
+                "email": "string",
+                "phone": "string"
+            }
+        },
+        "settings": {
+            "theme": "string",
+            "notifications": "number"
+        }
+    }},
+    {"timestamp": "number"}
+]
 ```
 
 ## Generation Process
