@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(python test_vllm_basic.py:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(python test:*)",
+      "Bash(pytest:*)"
     ],
     "deny": []
   }

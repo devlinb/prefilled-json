@@ -13,9 +13,32 @@ What this does:
 
 ## How It Works
 
-I'll be adding VLLM and Langchain plugins soon.
+## VLLM Integration
 
-Right now know that this library requires VLLM with prefix caching, and a model that doesn't adhere to a strict back and forth chat template. This only works with LLM models that support resumption of generation in the same assistant turn.
+The library now includes a VLLM plugin for seamless integration! The plugin requires VLLM with prefix caching and base models (not chat/instruct variants) that support assistant message resumption.
+
+### Quick VLLM Usage
+
+```python
+from vllm import LLM
+from vllm_plugin import generate_with_json_prefilled
+
+# Initialize with a compatible base model
+llm = LLM(model="meta-llama/Llama-2-7b-hf", enable_prefix_caching=True)
+
+# Generate JSON with simple API
+outputs = generate_with_json_prefilled(
+    engine=llm,
+    prompts=["Generate user data:"],
+    json_prefilled_fields=[{"name": "string"}, {"age": "number"}]
+)
+
+print(outputs[0])
+# Output: Generate user data:
+# {"name": "Alice", "age": 30}
+```
+
+See `examples/vllm_plugin_example.py` for more detailed usage examples.
 
 The library attempts to fix up JSON structure by stripping whatever final token the LLM gave and fixing it up to be "correct". Right now that means `,`s and `}`s get fixed up.
 

@@ -30,10 +30,13 @@ dev = [
     "flake8>=6.0.0",
     "mypy>=1.0.0",
 ]
+vllm = [
+    "vllm>=0.2.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["driver*"]
+include = ["driver*", "vllm_plugin*"]
 
 [tool.black]
 line-length = 88

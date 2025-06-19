@@ -34,7 +34,10 @@ flake8 .                  # Linting
 ### Core Components
 
 - **`driver/json_driver.py`**: Main `JsonFieldDriver` class that orchestrates JSON generation
-- **`tests/unit/driver/test_json_driver.py`**: Comprehensive test suite covering all functionality
+- **`vllm_plugin/json_prefilled_plugin.py`**: VLLM integration plugin for seamless JSON generation
+- **`tests/unit/driver/test_json_driver.py`**: Comprehensive test suite for core driver
+- **`tests/unit/vllm_plugin/test_json_prefilled_plugin.py`**: Test suite for VLLM plugin
+- **`examples/vllm_plugin_example.py`**: Usage examples for VLLM integration
 
 ### Key Architecture Patterns
 
@@ -65,7 +68,42 @@ Fields are specified as dictionaries with single key-value pairs:
 - Raises `ValueError` for invalid field types or malformed values
 - Provides clear error messages for debugging
 
+## VLLM Plugin
+
+The `vllm_plugin` directory contains a complete VLLM integration that provides:
+
+### Key Features
+- **Model Compatibility Checking**: Automatically validates that the model supports assistant message resumption
+- **Seamless API Integration**: Extends VLLM's generate method with `json_prefilled_fields` parameter
+- **Graceful Fallback**: Falls back to standard VLLM generation if JSON prefilled mode fails
+- **Session Management**: Tracks iterative generation state across multiple field completions
+
+### Usage Pattern
+```python
+from vllm import LLM
+from vllm_plugin import generate_with_json_prefilled
+
+llm = LLM(model="meta-llama/Llama-2-7b-hf", enable_prefix_caching=True)
+
+outputs = generate_with_json_prefilled(
+    engine=llm,
+    prompts=["Generate user data:"],
+    json_prefilled_fields=[{"name": "string"}, {"age": "number"}]
+)
+```
+
+### Compatible Models
+- Base models (e.g., `meta-llama/Llama-2-7b-hf`)
+- Models without strict chat templates
+- Models that support resuming assistant message generation
+
+### Incompatible Models
+- Chat models (e.g., `-chat`, `-instruct` variants)
+- Models with strict turn-taking chat templates
+- Models that enforce conversation patterns
+
 ## Dependencies
 
-- Runtime: No external dependencies (Python 3.8+)
+- Runtime: No external dependencies for core driver (Python 3.8+)
+- VLLM Plugin: Requires `vllm` package
 - Development: pytest, black, isort, mypy, flake8, pytest-cov
