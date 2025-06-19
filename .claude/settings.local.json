@@ -4,7 +4,17 @@
       "Bash(python test_vllm_basic.py:*)",
       "Bash(pip install:*)",
       "Bash(python test:*)",
-      "Bash(pytest:*)"
+      "Bash(pytest:*)",
+      "WebFetch(domain:docs.vllm.ai)",
+      "Bash(TEST_MODELS=\"DialoGPT-small\" python test_vllm_multi_model.py)",
+      "Bash(find:*)",
+      "Bash(python:*)",
+      "Bash(rm:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(ls:*)",
+      "Bash(timeout 300 python test_phi35_simple_load.py)",
+      "Bash(grep:*)",
+      "Bash(echo)"
     ],
     "deny": []
   }

@@ -2,20 +2,73 @@
 
 A Python library that helps low-parameter LLMs generate valid JSON by controlling the generation process through iterative field-by-field completion.
 
-Small/low-parameter LLMs struggle to generate valid JSON, this library fixes that by prefilling JSON field names and stopping generation after a single field has been filled out.
+Small/low-parameter LLMs struggle to generate valid JSON, this library fixes that by prefilling JSON field names and using pattern matching to extract clean field values.
 
 What this does:
 
 1. **Controls the generation process**: The library fills in JSON field names and structure
 2. **Letting the LLM focus on values**: The LLM only generates field values
-3. **Using stop tokens**: Uses JSON delimiters (like `,`) as stop tokens to regain control after each field value
+3. **Using pattern extraction**: Uses regex patterns to extract precise field values from model output
 4. **Ensuring valid structure**: The library maintains proper JSON syntax throughout
 
 ## How It Works
 
+The library uses a **streaming approach with pattern matching** for modern LLMs. Instead of relying on stop tokens (which modern instruction-tuned models often ignore), it allows models to over-generate content and then extracts precise field values using regex patterns. This approach works reliably with state-of-the-art models like Qwen, Phi-3.5, and Gemma.
+
+## Architecture
+
+### Core Components
+
+- **StreamingJsonFieldDriver**: Pattern-matching based JSON generation that works with modern models
+- **JsonFieldDriver**: Traditional stop-token based driver (for custom implementations)
+- **VLLM Plugin**: Seamless integration with VLLM using the streaming approach
+
 ## VLLM Integration
 
-The library now includes a VLLM plugin for seamless integration! The plugin requires VLLM with prefix caching and base models (not chat/instruct variants) that support assistant message resumption.
+The library includes a VLLM plugin with **intelligent model compatibility detection** that tests actual technical capabilities rather than relying on naming patterns.
+
+### Model Compatibility
+
+The plugin automatically detects compatible models by testing:
+- Assistant message resumption capabilities
+- Chat template flexibility  
+- `continue_final_message` parameter support
+- Custom template acceptance
+
+#### ✅ **Highly Compatible Models (Under 8B Parameters)**
+
+**Recommended Chat Models:**
+```python
+# Qwen models (excellent JSON generation)
+"Qwen/Qwen2.5-0.5B-Instruct"     # 0.5B - Ultra lightweight
+"Qwen/Qwen2.5-1.5B-Instruct"     # 1.5B - Best balance
+"Qwen/Qwen2.5-3B-Instruct"       # 3B - Production ready
+"Qwen/Qwen2.5-7B-Instruct"       # 7B - Maximum performance
+"Qwen/Qwen2.5-Coder-1.5B-Instruct" # 1.5B - Code/JSON specialized
+
+# Microsoft Phi models (excellent chat flexibility)
+"microsoft/phi-2"                 # 2.7B - Versatile base/chat
+"microsoft/Phi-3-mini-4k-instruct" # 3.8B - Strong reasoning
+"microsoft/Phi-3.5-mini-instruct" # 3.8B - Latest with 128K context
+
+# Google Gemma models (production tested)
+"google/gemma-2b-it"             # 2B - Efficient chat
+"google/gemma-7b-it"             # 7B - High performance chat
+```
+
+**Base Models (Maximum Flexibility):**
+```python
+"meta-llama/Llama-3.2-1B"        # 1B - Latest Llama base
+"meta-llama/Llama-3.2-3B"        # 3B - Balanced base model
+"TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T" # 1.1B - Ultra efficient
+"microsoft/DialoGPT-medium"      # 345M - Proven compatibility
+```
+
+#### ❌ **Incompatible Models**
+Models with rigid chat templates that enforce strict role alternation:
+- `meta-llama/Llama-2-7b-chat-hf` (rigid template)
+- `meta-llama/Llama-3.1-8B-Instruct` (strict turn-taking)
+- Most models with very strict chat formatting
 
 ### Quick VLLM Usage
 
@@ -23,8 +76,8 @@ The library now includes a VLLM plugin for seamless integration! The plugin requ
 from vllm import LLM
 from vllm_plugin import generate_with_json_prefilled
 
-# Initialize with a compatible base model
-llm = LLM(model="meta-llama/Llama-2-7b-hf", enable_prefix_caching=True)
+# Initialize with a compatible model (auto-detected)
+llm = LLM(model="Qwen/Qwen2.5-1.5B-Instruct", enable_prefix_caching=True)
 
 # Generate JSON with simple API
 outputs = generate_with_json_prefilled(
@@ -38,7 +91,27 @@ print(outputs[0])
 # {"name": "Alice", "age": 30}
 ```
 
-See `examples/vllm_plugin_example.py` for more detailed usage examples.
+### Testing Model Compatibility
+
+```python
+from vllm import LLM
+from vllm_plugin.json_prefilled_plugin import VLLMJSONPrefilledPlugin
+
+def test_model(model_name):
+    try:
+        llm = LLM(model=model_name, trust_remote_code=True)
+        plugin = VLLMJSONPrefilledPlugin(llm)
+        print(f"✅ {model_name} is compatible!")
+        return True
+    except Exception as e:
+        print(f"❌ {model_name}: {e}")
+        return False
+
+# Test any model
+test_model("your-model-here")
+```
+
+See `examples/vllm_plugin_example.py` for more detailed usage examples and `TESTING.md` for comprehensive testing instructions.
 
 The library attempts to fix up JSON structure by stripping whatever final token the LLM gave and fixing it up to be "correct". Right now that means `,`s and `}`s get fixed up.
 

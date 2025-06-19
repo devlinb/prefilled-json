@@ -41,31 +41,110 @@ class TestVLLMJSONPrefilledPlugin:
         """Test that incompatible models raise ModelCompatibilityError."""
         self.mock_engine.model_config.model = "meta-llama/Llama-2-7b-chat-hf"
         
-        with pytest.raises(ModelCompatibilityError, match="uses strict chat template"):
+        # Create a mock tokenizer that will fail all compatibility tests
+        mock_tokenizer = Mock()
+        mock_tokenizer.apply_chat_template = Mock()
+        
+        # Set a rigid chat template with multiple strict patterns (as string)
+        rigid_template = """
+        {%- if (message["role"] == "user") != (loop.index0 % 2 == 0) %}
+            {{- raise_exception("After the optional system message, conversation roles must alternate user/assistant/user/assistant/...") }}
+        {%- endif %}
+        User/assistant/user pattern must be followed.
+        raise_exception must alternate user/assistant/user
+        """
+        
+        # Store the template string properly
+        mock_tokenizer._chat_template = rigid_template
+        
+        # Mock that continue_final_message test fails (returns same result)
+        mock_tokenizer.apply_chat_template.return_value = "rigid template output"
+        
+        # Mock that setting a flexible template fails (simulates rigid enforcement)
+        def failing_template_setter(self, value):
+            raise Exception("Template validation failed - role alternation enforced")
+        
+        # Create a property that returns the rigid template but fails when trying to set
+        type(mock_tokenizer).chat_template = property(
+            lambda self: self._chat_template,
+            failing_template_setter
+        )
+        
+        self.mock_engine.llm_engine = Mock()
+        self.mock_engine.llm_engine.tokenizer = mock_tokenizer
+        
+        with pytest.raises(ModelCompatibilityError, match="does not support assistant message resumption"):
             VLLMJSONPrefilledPlugin(self.mock_engine)
     
-    def test_model_compatibility_check_patterns(self):
-        """Test various model name patterns for compatibility."""
-        test_cases = [
-            ("meta-llama/Llama-2-7b-hf", True),  # Compatible
-            ("microsoft/DialoGPT-medium", True),  # Compatible
-            ("meta-llama/Llama-2-7b-chat-hf", False),  # Chat model
-            ("microsoft/DialoGPT-medium-instruct", False),  # Instruct model
-            ("THUDM/chatglm-6b", False),  # ChatGLM
-            ("lmsys/vicuna-7b-v1.5", False),  # Vicuna
-        ]
+    def test_model_compatibility_check_technical(self):
+        """Test technical compatibility detection with mocked tokenizers."""
         
-        for model_name, should_be_compatible in test_cases:
-            self.mock_engine.model_config.model = model_name
-            
-            if should_be_compatible:
-                # Should not raise exception
-                plugin = VLLMJSONPrefilledPlugin(self.mock_engine)
-                assert plugin is not None
-            else:
-                # Should raise ModelCompatibilityError
-                with pytest.raises(ModelCompatibilityError):
-                    VLLMJSONPrefilledPlugin(self.mock_engine)
+        # Test case 1: Model without tokenizer (should be compatible)
+        self.mock_engine.model_config.model = "base-model-without-tokenizer"
+        plugin = VLLMJSONPrefilledPlugin(self.mock_engine)
+        assert plugin is not None
+        
+        # Test case 2: Model with tokenizer but no apply_chat_template (base model)
+        mock_tokenizer = Mock()
+        del mock_tokenizer.apply_chat_template  # Remove the method
+        self.mock_engine.llm_engine = Mock()
+        self.mock_engine.llm_engine.tokenizer = mock_tokenizer
+        self.mock_engine.model_config.model = "base-model-compatible"
+        
+        plugin = VLLMJSONPrefilledPlugin(self.mock_engine)
+        assert plugin is not None
+        
+        # Test case 3: Model with rigid chat template (should be incompatible)
+        mock_tokenizer_rigid = Mock()
+        mock_tokenizer_rigid.apply_chat_template = Mock()
+        
+        # Set up rigid template with multiple strict patterns
+        rigid_template = """
+        {%- if (message["role"] == "user") != (loop.index0 % 2 == 0) %}
+            {{- raise_exception("After the optional system message, conversation roles must alternate user/assistant/user/assistant/...") }}
+        {%- endif %}
+        User/assistant/user pattern must be followed.
+        raise_exception must alternate user/assistant/user
+        """
+        
+        mock_tokenizer_rigid._chat_template = rigid_template
+        
+        # Mock the apply_chat_template to behave like a rigid template (same output regardless)
+        mock_tokenizer_rigid.apply_chat_template.return_value = "rigid template result"
+        
+        # Mock that setting a flexible template fails 
+        def rigid_template_setter(self, value):
+            raise Exception("Template validation failed - role alternation enforced")
+        
+        type(mock_tokenizer_rigid).chat_template = property(
+            lambda self: self._chat_template,
+            rigid_template_setter
+        )
+        
+        self.mock_engine.llm_engine.tokenizer = mock_tokenizer_rigid
+        self.mock_engine.model_config.model = "rigid-chat-model"
+        
+        with pytest.raises(ModelCompatibilityError):
+            VLLMJSONPrefilledPlugin(self.mock_engine)
+        
+        # Test case 4: Model with flexible chat template (should be compatible)
+        mock_tokenizer_flexible = Mock()
+        mock_tokenizer_flexible.apply_chat_template = Mock()
+        mock_tokenizer_flexible.chat_template = "{% for message in messages %}{{ message.content }}{% endfor %}"
+        
+        # Mock flexible behavior - continue_final_message makes a difference
+        def flexible_apply_template(*args, **kwargs):
+            if kwargs.get('continue_final_message', False):
+                return "flexible template with continuation"
+            return "flexible template without continuation"
+        
+        mock_tokenizer_flexible.apply_chat_template.side_effect = flexible_apply_template
+        
+        self.mock_engine.llm_engine.tokenizer = mock_tokenizer_flexible
+        self.mock_engine.model_config.model = "flexible-chat-model"
+        
+        plugin = VLLMJSONPrefilledPlugin(self.mock_engine)
+        assert plugin is not None
     
     def test_create_session(self):
         """Test session creation."""
@@ -97,16 +176,15 @@ class TestVLLMJSONPrefilledPlugin:
     
     @patch('vllm.SamplingParams')
     def test_get_sampling_params(self, mock_sampling_params):
-        """Test sampling parameters generation."""
+        """Test sampling parameters generation for streaming approach."""
         plugin = VLLMJSONPrefilledPlugin(self.mock_engine)
         
-        stop_sequences = [",", "}"]
-        plugin._get_sampling_params(stop_sequences)
+        plugin._get_sampling_params()
         
         mock_sampling_params.assert_called_once_with(
             temperature=0.1,
-            max_tokens=100,
-            stop=stop_sequences,
+            max_tokens=50,
+            stop=None,  # No stop sequences for streaming approach
             skip_special_tokens=True
         )
     
