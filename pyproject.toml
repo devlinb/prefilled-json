@@ -5,13 +5,21 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "prefilled-json"
 version = "0.1.0"
-description = "A Python library for generating JSON by iteratively prompting an LLM to fill in field values"
+description = "Generate valid JSON with small LLMs using iterative field-by-field completion"
 readme = "README.md"
 requires-python = ">=3.8"
+license = {file = "LICENSE"}
+authors = [
+    {name = "prefilled-json contributors"}
+]
+keywords = ["json", "llm", "ai", "vllm", "small-models", "json-generation"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -21,10 +29,16 @@ classifiers = [
 ]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/devlinb/prefilled-json"
+Repository = "https://github.com/devlinb/prefilled-json"
+Documentation = "https://github.com/devlinb/prefilled-json#readme"
+"Bug Reports" = "https://github.com/devlinb/prefilled-json/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
+    "pytest-cov>=4.0.0", 
     "black>=23.0.0",
     "isort>=5.12.0",
     "flake8>=6.0.0",
@@ -33,10 +47,13 @@ dev = [
 vllm = [
     "vllm>=0.2.0",
 ]
+all = [
+    "vllm>=0.2.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["driver*", "vllm_plugin*"]
+include = ["prefilled_json*"]
 
 [tool.black]
 line-length = 88

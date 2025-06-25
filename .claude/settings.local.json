@@ -14,7 +14,8 @@
       "Bash(ls:*)",
       "Bash(timeout 300 python test_phi35_simple_load.py)",
       "Bash(grep:*)",
-      "Bash(echo)"
+      "Bash(echo)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }
