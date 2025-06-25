@@ -2,7 +2,7 @@
 
 A Python library that helps low-parameter LLMs generate valid JSON by controlling the generation process through iterative field-by-field completion.
 
-Small/low-parameter LLMs struggle to generate valid JSON, this library fixes that by prefilling JSON field names and using pattern matching to extract clean field values.
+Small/low-parameter LLMs struggle to generate valid JSON, this library helps them out  by prefilling JSON field names and using pattern matching to extract clean field values.
 
 What this does:
 
@@ -13,7 +13,7 @@ What this does:
 
 ## How It Works
 
-The library uses a **streaming approach with pattern matching** for modern LLMs. Instead of relying on stop tokens (which modern instruction-tuned models often ignore), it allows models to over-generate content and then extracts precise field values using regex patterns. This approach works reliably with state-of-the-art models like Qwen, Phi-3.5, and Gemma.
+The library uses a **streaming approach with pattern matching** for modern LLMs. Stop tokens are not 100% reliable across models, using streaming output is the only way I was able to make this 100% reliable. Accordingly, models may over-generate content, which this library then backtracks through and  extracts precise field values using regex patterns. This approach works reliably with state-of-the-art models like Qwen, Phi-3.5, and Gemma. It should work fine even with highly quantized low-param models.
 
 ## Architecture
 
@@ -25,7 +25,7 @@ The library uses a **streaming approach with pattern matching** for modern LLMs.
 
 ## VLLM Integration
 
-The library includes a VLLM plugin with **intelligent model compatibility detection** that tests actual technical capabilities rather than relying on naming patterns.
+The library includes a VLLM plugin with intelligent model compatibility detection that runs a bunch of checks to see if the loaded model is compatible.
 
 ### Model Compatibility
 
@@ -35,9 +35,9 @@ The plugin automatically detects compatible models by testing:
 - `continue_final_message` parameter support
 - Custom template acceptance
 
-#### ✅ **Highly Compatible Models (Under 8B Parameters)**
+#### Sample Models
 
-**Recommended Chat Models:**
+**Chat:**
 ```python
 # Qwen models (excellent JSON generation)
 "Qwen/Qwen2.5-0.5B-Instruct"     # 0.5B - Ultra lightweight
@@ -56,7 +56,7 @@ The plugin automatically detects compatible models by testing:
 "google/gemma-7b-it"             # 7B - High performance chat
 ```
 
-**Base Models (Maximum Flexibility):**
+**Base Models**
 ```python
 "meta-llama/Llama-3.2-1B"        # 1B - Latest Llama base
 "meta-llama/Llama-3.2-3B"        # 3B - Balanced base model
@@ -64,7 +64,7 @@ The plugin automatically detects compatible models by testing:
 "microsoft/DialoGPT-medium"      # 345M - Proven compatibility
 ```
 
-#### ❌ **Incompatible Models**
+#### Incompatible Models
 Models with rigid chat templates that enforce strict role alternation:
 - `meta-llama/Llama-2-7b-chat-hf` (rigid template)
 - `meta-llama/Llama-3.1-8B-Instruct` (strict turn-taking)
@@ -113,104 +113,108 @@ test_model("your-model-here")
 
 See `examples/vllm_plugin_example.py` for more detailed usage examples and `TESTING.md` for comprehensive testing instructions.
 
-The library attempts to fix up JSON structure by stripping whatever final token the LLM gave and fixing it up to be "correct". Right now that means `,`s and `}`s get fixed up.
+The library uses pattern matching to extract clean field values from model output, automatically handling over-generation and ensuring valid JSON structure.
 
 ## What it doesn't do
 
-Because we are dealing with very small parameter models, a lot of things are not going to work:
+Because we focus on reliable JSON generation, some advanced features are not supported:
 
 1. Fancy JSON schema restrictions on field values
-2. Types other than string and number
-3. Optional fields.
-
-Nested objects are now supported! See examples below.
+2. Types other than string and number (object nesting is supported)
+3. Optional fields
 
 ## Usage
+
+### VLLM Integration (Recommended)
+
+```python
+from vllm import LLM
+from vllm_plugin import generate_with_json_prefilled
+
+# Initialize VLLM with any compatible model
+llm = LLM(model="Qwen/Qwen2.5-1.5B-Instruct", trust_remote_code=True)
+
+# Generate JSON with simple API
+outputs = generate_with_json_prefilled(
+    engine=llm,
+    prompts=["Create user profile:"],
+    json_prefilled_fields=[
+        {"name": "string"},
+        {"age": "number"},
+        {"city": "string"}
+    ]
+)
+
+print(outputs[0])
+# Output: Create user profile:
+# {"name": "Alice", "age": 30, "city": "Seattle"}
+
+# Nested object usage
+nested_outputs = generate_with_json_prefilled(
+    engine=llm,
+    prompts=["Generate complete user data:"],
+    json_prefilled_fields=[
+        {"name": "string"},
+        {"address": {
+            "street": "string",
+            "city": "string",
+            "zip": "number"
+        }},
+        {"age": "number"}
+    ]
+)
+
+print(nested_outputs[0])
+# Output: Generate complete user data:
+# {"name": "Alice", "address": {"street": "123 Main St", "city": "Seattle", "zip": 98101}, "age": 30}
+```
+
+### Custom Driver Usage (Advanced)
+
+For custom LLM implementations, you can use the core driver directly:
 
 ```python
 from driver.json_driver import JsonFieldDriver
 
-# Define your generation function (connects to your LLM)
+# Define your generation function
 def my_generate_func(prompt: str, stop_token: str = None) -> str:
-    # Your LLM call here - prompt contains the partial JSON so far
-    # stop_token tells the LLM when to stop (e.g., "," or None for final field)
-    return llm_response
+    # Your LLM call here - stop_token parameter available but not required
+    return your_llm_response
 
-# Basic usage with flat fields
-fields = [
-    {"name": "string"},
-    {"age": "number"},
-    {"city": "string"}
-]
-
+# Create driver and generate JSON
 driver = JsonFieldDriver(generate=my_generate_func)
-result = driver.generate_json(fields)
-# Returns: '{"name": "Alice", "age": 30, "city": "Seattle"}'
-
-# Nested object usage
-nested_fields = [
-    {"name": "string"},
-    {"address": {
-        "street": "string",
-        "city": "string",
-        "zip": "number"
-    }},
-    {"age": "number"}
-]
-
-result = driver.generate_json(nested_fields)
-# Returns: '{"name": "Alice", "address": {"street": "123 Main St", "city": "Seattle", "zip": 98101}, "age": 30}'
+result = driver.generate_json([{"name": "string"}, {"age": "number"}])
 ```
 
-## Nested Objects
+## How the Streaming Approach Works
 
-You can create arbitrarily deep nested structures:
+The library uses a sophisticated pattern-matching approach that works reliably with modern instruction-tuned models:
 
-```python
-# Deeply nested example
-complex_fields = [
-    {"user": {
-        "profile": {
-            "name": "string",
-            "contact": {
-                "email": "string",
-                "phone": "string"
-            }
-        },
-        "settings": {
-            "theme": "string",
-            "notifications": "number"
-        }
-    }},
-    {"timestamp": "number"}
-]
-```
+1. **Step 1**: Sends `'{"name": '` to LLM (no stop tokens)
+   - LLM generates: `'"Alice", "age": 30, "city": "Seattle", "email": "alice@example.com"'`
+   - Library extracts: `'"Alice"'` using regex pattern matching
 
-## Generation Process
+2. **Step 2**: Sends `'{"name": "Alice", "age": '` to LLM
+   - LLM generates: `'25, "city": "Seattle", "active": true'`
+   - Library extracts: `'25'` as the numeric value
 
-For the example above, the library works as follows:
+3. **Step 3**: Sends `'{"name": "Alice", "age": 25, "city": '` to LLM
+   - LLM generates: `'"Seattle"}, "country": "USA"'`
+   - Library extracts: `'"Seattle"'` using pattern matching
 
-1. **Step 1**: Sends `'{"name": '` to LLM with stop token `','`
-   - LLM generates: `'"Alice",'` 
-   - Library strips trailing comma, gets: `'"Alice"'`
+4. **Final result**: `'{"name": "Alice", "age": 25, "city": "Seattle"}'`
 
-2. **Step 2**: Sends `'{"name": "Alice", "age": '` to LLM with stop token `','`
-   - LLM generates: `'30,'`
-   - Library strips trailing comma, gets: `'30'`
-
-3. **Step 3**: Sends `'{"name": "Alice", "age": 30, "city": '` to LLM with no stop token
-   - LLM generates: `'"Seattle"}'`
-   - Library strips trailing brace, gets: `'"Seattle"'`
-
-4. **Final result**: `'{"name": "Alice", "age": 30, "city": "Seattle"}'`
+This approach **works with modern instruction-tuned models** because it doesn't fight their tendency to over-generate - instead, it extracts exactly what's needed using robust pattern matching.
 
 ## Features
 
-- **Field Types**: Supports `"string"` and `"number"` field types
-- **Automatic Quoting**: Automatically adds quotes to string values if missing
-- **Validation**: Validates that number fields contain valid numeric values
+- **Field Types**: Supports `"string"` and `"number"` field types, plus nested objects
+- **Pattern Extraction**: Robust regex-based field value extraction from over-generated content
+- **Modern Model Support**: Works reliably with instruction-tuned models (Qwen, Phi-3.5, Gemma, etc.)
+- **Automatic Validation**: Validates numeric fields and handles string quoting automatically
 - **Error Handling**: Clear error messages for invalid field types or malformed values
-- **Flexible Integration**: Works with any LLM that accepts prompt + stop token
+- **VLLM Integration**: Seamless integration with VLLM using streaming approach
+- **Compatibility Detection**: Automatic technical testing of model capabilities
 
 ## Installation
 
@@ -248,10 +252,3 @@ fields = [
     {"active": "string"}  # booleans can be represented as strings
 ]
 ```
-
-## Why This Approach Works
-
-1. **Reduced Cognitive Load**: LLM only needs to generate individual values, not entire JSON structure
-2. **Guaranteed Syntax**: Library ensures proper JSON formatting, quotes, commas, and brackets
-3. **Stop Token Control**: Prevents LLM from over-generating or breaking JSON structure
-4. **Incremental Building**: Each step builds on valid JSON, making it easier for LLM to understand context
