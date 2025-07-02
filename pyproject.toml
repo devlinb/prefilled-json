@@ -4,17 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prefilled-json"
-version = "0.1.0"
-description = "Generate valid JSON with small LLMs using iterative field-by-field completion"
+version = "0.2.1"
+description = "Generate valid JSON with small LLMs using stop token control and field-by-field completion"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}
 authors = [
     {name = "prefilled-json contributors"}
 ]
-keywords = ["json", "llm", "ai", "vllm", "small-models", "json-generation"]
+keywords = ["json", "llm", "ai", "vllm", "small-models", "json-generation", "stop-tokens", "reliable-json"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
@@ -45,10 +45,10 @@ dev = [
     "mypy>=1.0.0",
 ]
 vllm = [
-    "vllm>=0.2.0",
+    "vllm>=0.6.0",
 ]
 all = [
-    "vllm>=0.2.0",
+    "vllm>=0.6.0",
 ]
 
 [tool.setuptools.packages.find]

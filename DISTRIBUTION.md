@@ -112,7 +112,7 @@ Update version in:
 **Dev**: Test and linting tools
 
 This structure provides:
-- ✅ **Separation of concerns**: Core and VLLM are separate
-- ✅ **Optional dependencies**: Users only install what they need
-- ✅ **Clean imports**: Intuitive package structure
-- ✅ **Backward compatibility**: Existing code continues to work
+- **Separation of concerns**: Core and VLLM are separate
+- **Optional dependencies**: Users only install what they need
+- **Clean imports**: Intuitive package structure
+- **Backward compatibility**: Existing code continues to work

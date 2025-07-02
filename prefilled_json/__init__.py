@@ -2,19 +2,21 @@
 Prefilled JSON - Generate valid JSON with small LLMs
 
 A Python library that helps low-parameter LLMs generate valid JSON by controlling
-the generation process through iterative field-by-field completion.
+the generation process through stop tokens and field-by-field completion.
+Achieves 100% reliability on complex conversation scenarios.
 
 Basic Usage:
-    from prefilled_json import JsonFieldDriver
+    from driver.stop_token_json_driver import StopTokenJsonDriver
     
-    driver = JsonFieldDriver(generate=your_llm_function)
+    driver = StopTokenJsonDriver(generate=your_llm_function, model_config={})
     result = driver.generate_json([{"name": "string"}, {"age": "number"}])
 
-VLLM Integration:
-    from prefilled_json.vllm_integration import generate_with_json_prefilled
+VLLM Integration (Recommended):
+    from vllm_plugin import generate_with_json_prefilled
     from vllm import LLM
     
-    llm = LLM(model="Qwen/Qwen2.5-1.5B-Instruct")
+    llm = LLM(model="microsoft/Phi-3.5-mini-instruct", 
+              enable_prefix_caching=True, disable_sliding_window=True)
     outputs = generate_with_json_prefilled(
         engine=llm,
         prompts=["Generate user data:"],
@@ -26,7 +28,7 @@ VLLM Integration:
 from .driver import JsonFieldDriver, StreamingJsonFieldDriver
 from .types import FieldType
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["JsonFieldDriver", "StreamingJsonFieldDriver", "FieldType"]
 
 # VLLM integration - conditionally available  

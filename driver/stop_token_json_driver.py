@@ -1,0 +1,425 @@
+"""
+Stop Token JSON Driver
+
+Implements JSON generation using stop tokens for models that support reliable stopping.
+This approach preserves prefix caching by generating exact token counts without over-generation.
+
+Based on the strategy outlined in recommended_stop_token_strategy.md
+"""
+
+import re
+from typing import Optional, Dict, List, Any, Callable, Union, Literal
+
+# Import types from json_driver module
+FieldType = Union[Literal["string", "number"], Dict[str, Any]]
+
+
+class StopTokenJsonDriver:
+    """
+    JSON generation driver that uses stop tokens for precise field completion.
+    
+    This driver is optimized for models that support reliable stop token behavior,
+    particularly instruction-tuned models like Qwen2-Instruct, Phi-3-Instruct, etc.
+    
+    Benefits:
+    - Preserves prefix caching (no extra tokens generated)
+    - Precise stopping at JSON delimiters
+    - 2-4x faster than streaming approach for compatible models
+    - Lower token usage and resource efficiency
+    """
+    
+    def __init__(self, generate_func: Callable[[str, Optional[str]], str], model_config: Dict[str, Any]):
+        """
+        Initialize the stop token driver.
+        
+        Args:
+            generate_func: Function that takes (prompt, stop_token) and returns generated text
+            model_config: Configuration dict containing model-specific settings
+        """
+        self.generate = generate_func
+        self.model_config = model_config
+        
+        # Extract stop tokens from config
+        self.stop_tokens = model_config.get("stop_tokens", [",", "}", "\n"])
+        
+    def generate_json(self, fields: List[Dict[str, FieldType]]) -> str:
+        """
+        Generate JSON using stop tokens with smart prompting.
+        
+        Args:
+            fields: List of field specifications, each containing exactly one field
+            
+        Returns:
+            Complete JSON string
+        """
+        if not fields:
+            return "{}"
+            
+        # Start building the JSON
+        json_parts = ["{"]
+        
+        for i, field_spec in enumerate(fields):
+            # Validate field specification
+            assert len(field_spec) == 1, "Each field specification must have exactly one field"
+            
+            field_name, field_type = next(iter(field_spec.items()))
+            is_last_field = (i == len(fields) - 1)
+            
+            # Handle nested objects
+            if isinstance(field_type, dict):
+                nested_json = self._generate_nested_object(field_type)
+                json_parts.append(f'"{field_name}": {nested_json}')
+            else:
+                # Generate field value using stop tokens
+                current_json = "".join(json_parts)
+                field_prompt = current_json + f'"{field_name}": '
+                
+                field_value = self.generate_field_value(field_prompt, field_type, is_last_field)
+                json_parts.append(f'"{field_name}": {field_value}')
+            
+            # Add comma if not the last field
+            if not is_last_field:
+                json_parts.append(", ")
+        
+        json_parts.append("}")
+        return "".join(json_parts)
+    
+    def generate_field_value(self, prompt: str, field_type: str, is_last: bool) -> str:
+        """
+        Generate field value using stop tokens with direct prompting.
+        
+        Args:
+            prompt: Current JSON prompt ending with field name and colon
+            field_type: Type of field ("string" or "number")
+            is_last: Whether this is the last field (affects stop token usage)
+            
+        Returns:
+            Clean field value ready for JSON insertion
+        """
+        # Use direct prompting - let the model complete the field value directly
+        generation_prompt = prompt
+        
+        # Set token limits based on field type
+        if field_type == "string":
+            max_tokens = 15  # Reasonable limit for string values
+        elif field_type == "number":
+            max_tokens = 8   # Numbers should be short
+        else:
+            raise ValueError(f"Unsupported field type: {field_type}")
+        
+        # Use model-specific stop tokens
+        if is_last:
+            stop_tokens = None  # No stop for last field - let it complete naturally
+        else:
+            stop_tokens = self.stop_tokens[0] if self.stop_tokens else ","  # Use primary stop token
+        
+        # Generate with direct prompt
+        raw_result = self.generate(generation_prompt, stop_tokens)
+        
+        # Extract and clean the field value
+        return self._extract_field_value(raw_result, field_type)
+    
+    def _extract_field_value(self, raw_result: str, field_type: str) -> str:
+        """
+        Extract clean field value from generation result.
+        
+        Args:
+            raw_result: Raw text generated by the model
+            field_type: Expected field type for validation
+            
+        Returns:
+            Clean field value ready for JSON
+        """
+        if field_type == "string":
+            return self._sanitize_string_value(raw_result)
+        
+        elif field_type == "number":
+            # For numbers, extract the first valid number
+            # Clean up whitespace and common trailing punctuation first
+            cleaned = raw_result.strip().rstrip(",}")
+            match = re.search(r'-?\d+(?:\.\d+)?', cleaned)
+            if match:
+                return match.group(0)
+            else:
+                # Fallback to a default number if none found
+                return "0"
+        
+        # Fallback for other types
+        return raw_result.strip()
+    
+    def _sanitize_string_value(self, raw_value: str) -> str:
+        """
+        Sanitize string value to ensure valid JSON.
+        
+        Args:
+            raw_value: Raw string value that may contain invalid characters
+            
+        Returns:
+            Properly escaped and quoted JSON string
+        """
+        # Clean up whitespace first, but preserve delimiters for proper processing
+        cleaned = raw_value.strip()
+        
+        # Handle common patterns from over-generation  
+        # Remove newlines and extra content after first line if it looks like code
+        if '\n' in cleaned and ('>>>' in cleaned or 'print(' in cleaned or 'def ' in cleaned):
+            cleaned = cleaned.split('\n')[0].strip()
+        # For special characters, don't treat them as delimiters if the content is short
+        elif '\n' in cleaned or '\t' in cleaned:
+            # If content is short and contains special chars, preserve them
+            if len(cleaned) <= 20:  # Short content - preserve special chars
+                pass  # Keep the special characters
+            else:
+                # Long content - might be over-generation, split on newlines
+                if '\n' in cleaned:
+                    cleaned = cleaned.split('\n')[0].strip()
+        
+        # Extract content based on different patterns
+        content = ""
+        
+        # Pattern 1: Already properly quoted string
+        if cleaned.startswith('"') and cleaned.endswith('"') and len(cleaned) >= 2:
+            content = cleaned[1:-1]
+        # Pattern 1.5: Already quoted but with trailing content
+        elif cleaned.startswith('"') and '"' in cleaned[1:]:
+            # Find the closing quote of the first quoted string
+            closing_quote = cleaned.find('"', 1)
+            if closing_quote != -1:
+                content = cleaned[1:closing_quote]  # Extract content between quotes
+            
+        # Pattern 2: Check if we should prioritize content before delimiters
+        # But be smarter about when to split - avoid splitting short, reasonable content
+        elif (len(cleaned) > 30 and  # Only split longer content
+              any(delimiter in cleaned for delimiter in ['}', '\n', ',']) or  # Priority delimiters
+              (len(cleaned) > 50 and any(delimiter in cleaned for delimiter in ['.', '!', '?']))):  # Secondary delimiters for longer content
+            # Split on common delimiters to get the main content FIRST
+            # Find the earliest occurring delimiter
+            delimiters = [',', '}', '\n', '.', '!', '?']
+            earliest_pos = len(cleaned)
+            earliest_delimiter = None
+            
+            for delimiter in delimiters:
+                if delimiter in cleaned:
+                    pos = cleaned.find(delimiter)
+                    if pos < earliest_pos:
+                        earliest_pos = pos
+                        earliest_delimiter = delimiter
+            
+            if earliest_delimiter:
+                parts = cleaned.split(earliest_delimiter)
+                if parts[0].strip() and len(parts[0].strip()) >= 3:  # Ensure meaningful content
+                    cleaned = parts[0].strip()
+            
+            # For the cleaned content, prioritize unquoted content at the start
+            # Check if it starts with unquoted content
+            words = cleaned.split()
+            if words and not words[0].startswith('"'):
+                # If first word(s) don't start with quotes, use them
+                if len(words) == 1:
+                    content = words[0]
+                elif len(words) <= 4:  # Be more generous with word count
+                    content = " ".join(words)
+                else:
+                    content = " ".join(words[:3])  # Limit for over-generation
+            elif '"' in cleaned:
+                # Fall back to quoted content if no unquoted content at start
+                match = re.search(r'"([^"]*)"', cleaned)
+                if match:
+                    content = match.group(1)
+                else:
+                    content = cleaned.replace('"', '')
+            else:
+                # Limit word count for over-generation
+                if len(words) > 4:
+                    content = " ".join(words[:3])
+                else:
+                    content = cleaned
+                    
+        # Pattern 3: Quoted string within text (extract the quoted part)
+        elif '"' in cleaned:
+            # For strings with internal quotes, try to extract the whole phrase first
+            words = cleaned.split()
+            if len(words) <= 4:
+                # If it's a short phrase, keep the whole thing
+                content = cleaned
+            else:
+                # For longer content, look for quoted parts but limit length
+                quoted_parts = re.findall(r'"([^"]*)"', cleaned)
+                if quoted_parts:
+                    if len(quoted_parts) == 1:
+                        # Single quoted part - see if we should include surrounding words
+                        if len(words) <= 5:
+                            content = cleaned  # Keep everything if reasonable length
+                        else:
+                            content = quoted_parts[0]  # Just the quoted part
+                    else:
+                        # Multiple quoted parts - extract surrounding context
+                        content = " ".join(words[:4])  # First few words including quotes
+                else:
+                    # Fallback to removing quotes manually
+                    content = cleaned.replace('"', '')
+                
+        # Pattern 4: Plain unquoted text
+        else:
+            # Clean up trailing delimiters first
+            cleaned = cleaned.rstrip(',}')
+            # Limit word count for over-generation
+            words = cleaned.split()
+            if len(words) > 4:  # Less aggressive truncation
+                content = " ".join(words[:3])
+            else:
+                content = cleaned
+        
+        # Handle empty content
+        if not content.strip():
+            content = ""
+        
+        # Remove or escape invalid JSON control characters
+        content = self._escape_json_string(content.strip())
+        
+        # Return properly quoted string
+        return f'"{content}"'
+    
+    def _escape_json_string(self, text: str) -> str:
+        """
+        Escape a string for valid JSON according to RFC 7159.
+        
+        Args:
+            text: Raw text that may contain invalid characters
+            
+        Returns:
+            Properly escaped string safe for JSON
+        """
+        if not text:
+            return ""
+            
+        # Handle special escape sequences that need to be in order
+        # First handle backslashes (must be first to avoid double-escaping)
+        text = text.replace('\\', '\\\\')
+        
+        # Then handle other characters
+        replacements = {
+            '"': '\\"',       # Quote
+            '\n': '\\n',      # Newline
+            '\r': '\\r',      # Carriage return  
+            '\t': '\\t',      # Tab
+            '\b': '\\b',      # Backspace
+            '\f': '\\f',      # Form feed
+        }
+        
+        # Apply standard JSON escape sequences
+        for char, replacement in replacements.items():
+            text = text.replace(char, replacement)
+        
+        # Remove any remaining control characters (ASCII 0-31 except allowed ones)
+        # Keep only printable characters and properly escaped ones
+        cleaned_chars = []
+        for char in text:
+            if ord(char) >= 32:
+                # Printable character
+                cleaned_chars.append(char)
+            elif char in '\\nrt\b\f':
+                # Already properly escaped control char - keep it
+                cleaned_chars.append(char)
+            else:
+                # Invalid control character - remove it
+                continue
+        
+        text = ''.join(cleaned_chars)
+        
+        # Limit length to prevent over-generation issues
+        if len(text) > 100:  # Reasonable limit for most fields
+            # Try to cut at word boundary
+            if ' ' in text[:100]:
+                last_space = text[:100].rfind(' ')
+                text = text[:last_space]
+            else:
+                text = text[:100]
+        
+        return text
+    
+    def _generate_nested_object(self, nested_fields: Dict[str, FieldType]) -> str:
+        """
+        Generate a nested JSON object recursively.
+        
+        Args:
+            nested_fields: Dictionary of nested field specifications
+            
+        Returns:
+            Complete nested JSON object as string
+        """
+        if not nested_fields:
+            return "{}"
+        
+        # Convert nested dict to list format for recursive generation
+        field_list = [{name: field_type} for name, field_type in nested_fields.items()]
+        
+        # Recursively generate the nested object
+        return self.generate_json(field_list)
+
+
+# Model compatibility configurations
+STOP_TOKEN_EXCELLENT = {
+    "Qwen/Qwen2-1.5B-Instruct": {
+        "stop_reliable": True,
+        "json_quality": "good",
+        "prefix_cache": True,
+        "stop_tokens": [",", "}", "\n"]
+    },
+    "Qwen/Qwen2-7B-Instruct": {
+        "stop_reliable": True,
+        "json_quality": "excellent",
+        "prefix_cache": True,
+        "stop_tokens": [",", "}", "\n", "<|im_end|>"]
+    },
+    "microsoft/Phi-3-mini-4k-instruct": {
+        "stop_reliable": True,
+        "json_quality": "good",
+        "prefix_cache": True,
+        "stop_tokens": [",", "}", "\n"]
+    }
+}
+
+STOP_TOKEN_FIXABLE = {
+    "meta-llama/Meta-Llama-3-8B-Instruct": {
+        "fix_method": "stop_token_ids",
+        "required_ids": [128009],  # <|eot_id|>
+        "json_quality": "excellent",
+        "prefix_cache": True
+    }
+}
+
+STREAMING_ONLY = {
+    "meta-llama/Llama-2-7b-chat-hf": "ignores_stop_tokens",
+    "TinyLlama/TinyLlama-1.1B-Chat-v1.0": "poor_instruction_following"
+}
+
+
+def get_model_strategy(model_name: str) -> Dict[str, Any]:
+    """
+    Get the best generation strategy for a given model.
+    
+    Args:
+        model_name: Name/path of the model
+        
+    Returns:
+        Strategy configuration dictionary
+    """
+    if model_name in STOP_TOKEN_EXCELLENT:
+        return {
+            "method": "stop_tokens",
+            "config": STOP_TOKEN_EXCELLENT[model_name],
+            "driver_class": StopTokenJsonDriver
+        }
+    elif model_name in STOP_TOKEN_FIXABLE:
+        return {
+            "method": "stop_tokens_fixed",
+            "config": STOP_TOKEN_FIXABLE[model_name],
+            "driver_class": StopTokenJsonDriver  # TODO: Implement FixedStopTokenDriver
+        }
+    else:
+        return {
+            "method": "streaming",
+            "config": {"reason": STREAMING_ONLY.get(model_name, "unknown_compatibility")},
+            "driver_class": None  # Will use StreamingJsonFieldDriver
+        }

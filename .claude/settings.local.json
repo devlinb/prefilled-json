@@ -15,7 +15,11 @@
       "Bash(timeout 300 python test_phi35_simple_load.py)",
       "Bash(grep:*)",
       "Bash(echo)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.unsloth.ai)",
+      "WebFetch(domain:huggingface.co)",
+      "Bash(pip show:*)"
     ],
     "deny": []
   }
